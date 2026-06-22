@@ -1,0 +1,361 @@
+-- ============================================================
+-- DETALLE GIRO - 1_v2
+-- Conversión SQL Server → Oracle (compatible GoAnywhere MFT)
+-- Los bloques de fechas (CALC_DIA_INI, CALC_PRIMER_DIA_HABIL,
+-- CALC_DIA_FIN, CALC_PRIMER_DIA_MES) son idénticos al script
+-- DETALLE DESEMBOLSO 1_v2; se reutilizan aquí íntegramente.
+-- ============================================================
+WITH
+
+-- -------------------------------------------------------
+-- BLOQUE 1: Primer día del mes anterior al actual
+-- -------------------------------------------------------
+CALC_DIA_INI AS (
+    SELECT
+        LAST_DAY(ADD_MONTHS(SYSDATE, -2)) + 1 AS DiaIniMes
+    FROM DUAL
+),
+
+-- -------------------------------------------------------
+-- BLOQUE 2: Primer día hábil del mes anterior (PrimerDiaHabilMes)
+-- Usado en el filtro final: CORTE DISPERSION = yyMMdd + '.0900'
+-- -------------------------------------------------------
+CALC_PRIMER_DIA_HABIL AS (
+    SELECT
+        CASE
+            WHEN TO_CHAR(c.DiaIniMes,'D','NLS_TERRITORY=AMERICA') = '7'
+                 AND (c.DiaIniMes + 2) <> NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS
+                         WHERE Fecha = c.DiaIniMes + 2),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN c.DiaIniMes + 2
+            WHEN TO_CHAR(c.DiaIniMes,'D','NLS_TERRITORY=AMERICA') = '1'
+                 AND (c.DiaIniMes + 1) <> NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS
+                         WHERE Fecha = c.DiaIniMes + 1),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN c.DiaIniMes + 1
+            WHEN TO_CHAR(c.DiaIniMes,'D','NLS_TERRITORY=AMERICA') = '7'
+                 AND (c.DiaIniMes + 2) = NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS
+                         WHERE Fecha = c.DiaIniMes + 2),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN c.DiaIniMes + 3
+            WHEN TO_CHAR(c.DiaIniMes,'D','NLS_TERRITORY=AMERICA') = '1'
+                 AND (c.DiaIniMes + 1) = NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS
+                         WHERE Fecha = c.DiaIniMes + 1),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN c.DiaIniMes + 2
+            WHEN TO_CHAR(c.DiaIniMes,'D','NLS_TERRITORY=AMERICA') IN ('2','3','4','5')
+                 AND c.DiaIniMes = NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS
+                         WHERE Fecha = c.DiaIniMes),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN c.DiaIniMes + 1
+            WHEN TO_CHAR(c.DiaIniMes,'D','NLS_TERRITORY=AMERICA') = '6'
+                 AND c.DiaIniMes = NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS
+                         WHERE Fecha = c.DiaIniMes),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN c.DiaIniMes + 3
+            ELSE c.DiaIniMes
+        END AS PrimerDiaHabilMes
+    FROM CALC_DIA_INI c
+),
+
+-- -------------------------------------------------------
+-- BLOQUE 3: Primer día del mes actual (DiaFinMes base)
+-- -------------------------------------------------------
+CALC_DIA_FIN AS (
+    SELECT
+        LAST_DAY(ADD_MONTHS(SYSDATE, -1)) + 1 AS DiaFinMes
+    FROM DUAL
+),
+
+-- -------------------------------------------------------
+-- BLOQUE 4: Primer día hábil del mes actual (PrimerDiaMes)
+-- Usado en el WHERE principal para filtrar el mes del envío
+-- -------------------------------------------------------
+CALC_PRIMER_DIA_MES AS (
+    SELECT
+        CASE
+            WHEN TO_CHAR(f.DiaFinMes,'D','NLS_TERRITORY=AMERICA') = '7'
+                 AND (f.DiaFinMes + 2) <> NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS
+                         WHERE Fecha = f.DiaFinMes + 2),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN f.DiaFinMes + 2
+            WHEN TO_CHAR(f.DiaFinMes,'D','NLS_TERRITORY=AMERICA') = '1'
+                 AND (f.DiaFinMes + 1) <> NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS
+                         WHERE Fecha = f.DiaFinMes + 1),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN f.DiaFinMes + 1
+            WHEN TO_CHAR(f.DiaFinMes,'D','NLS_TERRITORY=AMERICA') = '7'
+                 AND (f.DiaFinMes + 2) = NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS
+                         WHERE Fecha = f.DiaFinMes + 2),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN f.DiaFinMes + 3
+            WHEN TO_CHAR(f.DiaFinMes,'D','NLS_TERRITORY=AMERICA') = '1'
+                 AND (f.DiaFinMes + 1) = NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS
+                         WHERE Fecha = f.DiaFinMes + 1),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN f.DiaFinMes + 2
+            WHEN TO_CHAR(f.DiaFinMes,'D','NLS_TERRITORY=AMERICA') IN ('2','3','4','5')
+                 AND f.DiaFinMes = NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS
+                         WHERE Fecha = f.DiaFinMes),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN f.DiaFinMes + 1
+            WHEN TO_CHAR(f.DiaFinMes,'D','NLS_TERRITORY=AMERICA') = '6'
+                 AND f.DiaFinMes = NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS
+                         WHERE Fecha = f.DiaFinMes),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN f.DiaFinMes + 3
+            ELSE f.DiaFinMes
+        END AS PrimerDiaMes
+    FROM CALC_DIA_FIN f
+),
+
+-- -------------------------------------------------------
+-- BLOQUE 5: Subconsulta PM numerada (ROW_NUMBER)
+-- Reemplaza los 10 LEFT JOIN con SELECT * en SQL Server.
+-- En Oracle SELECT * en subconsulta dentro de JOIN no está
+-- permitido directamente → se listan las columnas usadas.
+-- -------------------------------------------------------
+PM_RANKED AS (
+    SELECT
+         ROW_NUMBER() OVER (PARTITION BY DatosFactura ORDER BY idInformacionPM ASC) AS conteo
+        ,idInformacionPM
+        ,DatosFactura
+        ,Operacionacancelar
+        ,valorcruce
+    FROM ORIGINACIONPROD.INFORMACIONPM
+),
+
+-- -------------------------------------------------------
+-- BLOQUE 6: Query principal DETALLE GIRO
+-- -------------------------------------------------------
+GIRO AS (
+    SELECT DISTINCT
+         dre.Solicitud                                          AS SOLICITUD
+        ,dre.razonSocial                                        AS BENEFICIARIO
+        ,dre.numeroIdentificacion                               AS "CC/NIT/CE"
+        ,ban.Nombre                                             AS BANCO
+
+        -- -----------------------------------------------
+        -- NUMEROCUENTA
+        -- Lógica: si planmayor=1 e idDesembolsoDetalle=1
+        -- y no hay PM1 → usa OperacionCancelarPM de Operaciones
+        -- Si hay PM1 → concatena PM1..PM10 con montos
+        -- Caso contrario → numeroCuenta
+        -- FormatMoney reemplazado con TO_CHAR FM
+        -- ISNULL(pmX.valorcruce,'') → NVL(pmX.valorcruce,0)
+        --   (tipo numérico: no puede NVL a string vacío)
+        -- -----------------------------------------------
+        ,CASE
+            -- Sin PM registrado: usa campos de Operaciones directo
+            WHEN ope.planmayor = 1
+                 AND idDesembolsoDetalle = 1
+                 AND PM1.idInformacionPM IS NULL
+            THEN
+                CASE
+                    WHEN ope.OperacionaCancelarPM2 IS NOT NULL
+                         AND ope.OperacionaCancelarPM3 IS NOT NULL
+                    THEN  ope.OperacionCancelarPM
+                       || ' - $' || TRIM(TO_CHAR(ABS(ope.valorcruce1),'FM999,999,999,999'))
+                       || ' // ' || ope.OperacionaCancelarPM2
+                       || ' - $' || TRIM(TO_CHAR(ABS(ope.valorcruce2),'FM999,999,999,999'))
+                       || ' // ' || ope.OperacionaCancelarPM3
+                       || ' - $' || TRIM(TO_CHAR(ABS(ope.valorcruce3),'FM999,999,999,999'))
+
+                    WHEN ope.OperacionaCancelarPM2 IS NOT NULL
+                    THEN  ope.OperacionCancelarPM
+                       || ' - $' || TRIM(TO_CHAR(ABS(ope.valorcruce1),'FM999,999,999,999'))
+                       || ' // ' || ope.OperacionaCancelarPM2
+                       || ' - $' || TRIM(TO_CHAR(ABS(ope.valorcruce2),'FM999,999,999,999'))
+
+                    ELSE  ope.OperacionCancelarPM
+                       || ' - $' || TRIM(TO_CHAR(ABS(ope.valorcruce1),'FM999,999,999,999'))
+                END
+
+            -- Con PM registrado: concatena PM1 a PM10
+            WHEN ope.planmayor = 1
+                 AND PM1.idInformacionPM IS NOT NULL
+            THEN
+                -- PM1 (siempre presente en este WHEN)
+                PM1.Operacionacancelar
+                || CASE
+                     WHEN PM2.Operacionacancelar IS NULL
+                     THEN REPLACE(
+                            ' - $' || TRIM(TO_CHAR(ABS(NVL(PM1.valorcruce,0)),'FM999,999,999,999')) || ' // ',
+                            '//', '')
+                     ELSE ' - $' || TRIM(TO_CHAR(ABS(PM1.valorcruce),'FM999,999,999,999')) || ' // '
+                   END
+                -- PM2
+                || NVL(PM2.Operacionacancelar,'')
+                || REPLACE(
+                     ' - $' || TRIM(TO_CHAR(ABS(NVL(PM2.valorcruce,0)),'FM999,999,999,999')),
+                     ' - $0', '')
+                || CASE WHEN PM3.Operacionacancelar IS NOT NULL THEN '//' ELSE '' END
+                -- PM3
+                || NVL(PM3.Operacionacancelar,'')
+                || REPLACE(
+                     ' - $' || TRIM(TO_CHAR(ABS(NVL(PM3.valorcruce,0)),'FM999,999,999,999')),
+                     ' - $0', '')
+                || CASE WHEN PM4.Operacionacancelar IS NOT NULL THEN '//' ELSE '' END
+                -- PM4
+                || NVL(PM4.Operacionacancelar,'')
+                || REPLACE(
+                     ' - $' || TRIM(TO_CHAR(ABS(NVL(PM4.valorcruce,0)),'FM999,999,999,999')),
+                     ' - $0', '')
+                || CASE WHEN PM5.Operacionacancelar IS NOT NULL THEN '//' ELSE '' END
+                -- PM5
+                || NVL(PM5.Operacionacancelar,'')
+                || REPLACE(
+                     ' - $' || TRIM(TO_CHAR(ABS(NVL(PM5.valorcruce,0)),'FM999,999,999,999')),
+                     ' - $0', '')
+                || CASE WHEN PM6.Operacionacancelar IS NOT NULL THEN '//' ELSE '' END
+                -- PM6
+                || NVL(PM6.Operacionacancelar,'')
+                || REPLACE(
+                     ' - $' || TRIM(TO_CHAR(ABS(NVL(PM6.valorcruce,0)),'FM999,999,999,999')),
+                     ' - $0', '')
+                || CASE WHEN PM7.Operacionacancelar IS NOT NULL THEN '//' ELSE '' END
+                -- PM7
+                || NVL(PM7.Operacionacancelar,'')
+                || REPLACE(
+                     ' - $' || TRIM(TO_CHAR(ABS(NVL(PM7.valorcruce,0)),'FM999,999,999,999')),
+                     ' - $0', '')
+                || CASE WHEN PM8.Operacionacancelar IS NOT NULL THEN '//' ELSE '' END
+                -- PM8
+                || NVL(PM8.Operacionacancelar,'')
+                || REPLACE(
+                     ' - $' || TRIM(TO_CHAR(ABS(NVL(PM8.valorcruce,0)),'FM999,999,999,999')),
+                     ' - $0', '')
+                || CASE WHEN PM9.Operacionacancelar IS NOT NULL THEN '//' ELSE '' END
+                -- PM9
+                || NVL(PM9.Operacionacancelar,'')
+                || REPLACE(
+                     ' - $' || TRIM(TO_CHAR(ABS(NVL(PM9.valorcruce,0)),'FM999,999,999,999')),
+                     ' - $0', '')
+                || CASE WHEN PM10.Operacionacancelar IS NOT NULL THEN '//' ELSE '' END
+                -- PM10
+                || NVL(PM10.Operacionacancelar,'')
+                || REPLACE(
+                     ' - $' || TRIM(TO_CHAR(ABS(NVL(PM10.valorcruce,0)),'FM999,999,999,999')),
+                     ' - $0', '')
+
+            -- Sin planmayor: número de cuenta directo
+            ELSE dre.numeroCuenta
+         END                                                    AS NUMEROCUENTA
+
+        -- TIPOCUENTA: vacío si planmayor=1
+        ,CASE WHEN ope.planmayor = 1 THEN '' ELSE dre.tipoCuenta END AS TIPOCUENTA
+
+        -- VLRGIRAR: FormatMoney → TO_CHAR FM
+        ,'$' || TRIM(TO_CHAR(
+            CASE
+                WHEN seg.bMantenimientoPrepagado = 1 AND idDesembolsoDetalle = 6
+                THEN ABS(dre.montoDesembolsar)
+                ELSE ABS(dre.montoDesembolsar + NVL(df.ValorAccesoriosFactura, 0))
+            END,
+            'FM999,999,999,999'))                               AS VLRGIRAR
+
+        -- CANAL GIRO
+        ,CASE
+            WHEN ope.planmayor = 1 AND PM1.Operacionacancelar LIKE '81%' THEN 'PAGO ALTAIR'
+            WHEN ope.planmayor = 1 AND PM1.Operacionacancelar LIKE '98%' THEN 'PAGO BOT'
+            WHEN ope.planmayor = 1 AND PM1.Operacionacancelar LIKE '75%' THEN 'PAGO ALTAIR'
+            ELSE 'GIRO ACH'
+         END                                                    AS "CANAL GIRO"
+
+        -- OBSERVACIONES
+        -- CAST(x AS numeric) → CAST(x AS NUMBER) en Oracle
+        ,UPPER(
+            CASE
+                WHEN seg.bMantenimientoPrepagado = 1
+                     AND idDesembolsoDetalle = 6
+                THEN 'Mantenimiento Prepagado'
+
+                WHEN NVL(est.ValorSubvecionado, 0) > 0
+                     AND NVL(seg.BonoAstara, 0) > 0
+                     AND NVL(df.ValorAccesoriosFactura, 0) > 0
+                THEN 'Con Accesorios Subvencionado'
+                     || '-' || 'Descuento Bono poliza $'
+                     || CAST(ABS(NVL(CAST(seg.BonoAstara AS NUMBER), 0)) AS VARCHAR2(50))
+
+                WHEN NVL(est.ValorSubvecionado, 0) > 0
+                     AND NVL(seg.BonoAstara, 0) > 0
+                THEN 'Subvencionado'
+                     || '-' || 'Descuento Bono poliza $'
+                     || CAST(ABS(NVL(CAST(seg.BonoAstara AS NUMBER), 0)) AS VARCHAR2(50))
+
+                WHEN NVL(est.ValorSubvecionado, 0) > 0
+                THEN 'Subvencionado'
+
+                WHEN NVL(seg.BonoAstara, 0) > 0
+                THEN 'Descuento Bono poliza $'
+                     || CAST(ABS(NVL(CAST(seg.BonoAstara AS NUMBER), 0)) AS VARCHAR2(50))
+
+                WHEN NVL(df.ValorAccesoriosFactura, 0) > 0
+                THEN 'Accesorios'
+
+                ELSE ''
+            END
+         )                                                      AS OBSERVACIONES
+
+        -- CORTE DISPERSION: FORMAT + Format_DateToString → TO_CHAR Oracle
+        ,CASE
+            WHEN TO_CHAR(dre.fechaenvio, 'HH24') BETWEEN '07' AND '09'
+                THEN TO_CHAR(dre.fechaenvio, 'YYMMDD') || '.0900'
+            WHEN TO_CHAR(dre.fechaenvio, 'HH24') BETWEEN '11' AND '13'
+                THEN TO_CHAR(dre.fechaenvio, 'YYMMDD') || '.1300'
+            WHEN TO_CHAR(dre.fechaenvio, 'HH24') IN ('14','15')
+                THEN TO_CHAR(dre.fechaenvio, 'YYMMDD') || '.1500'
+         END                                                    AS "CORTE DISPERSION"
+
+    FROM ORIGINACION.DESEMBOLSORELACION                         dre
+    INNER JOIN BDPREMIERPRUEBA.BANCO                            ban  ON ban.Id          = dre.idBanco
+    LEFT JOIN  ORIGINACIONPROD.ORIGINACION                      ori  ON ori.caso        = dre.solicitud
+    LEFT JOIN  ORIGINACIONPROD.OPERACIONES                      ope  ON ope.IdOperaciones = ori.operaciones
+    LEFT JOIN  ORIGINACIONPROD.DATOSFACTURA                     df   ON df.idDatosFactura = ori.DatosFactura
+    LEFT JOIN  ORIGINACIONPROD.INFORMACIONESTUDIO               est  ON ori.InformaciondeEstudio = est.idInformacionestudio
+    LEFT JOIN  ORIGINACIONPROD.SEGUROS                          seg  ON ori.Seguros     = seg.idSeguros
+    -- PM1–PM10: referencian el CTE PM_RANKED con conteo 1..10
+    LEFT JOIN  PM_RANKED  PM1  ON PM1.DatosFactura  = df.idDatosFactura AND PM1.conteo  = 1
+    LEFT JOIN  PM_RANKED  PM2  ON PM2.DatosFactura  = df.idDatosFactura AND PM2.conteo  = 2
+    LEFT JOIN  PM_RANKED  PM3  ON PM3.DatosFactura  = df.idDatosFactura AND PM3.conteo  = 3
+    LEFT JOIN  PM_RANKED  PM4  ON PM4.DatosFactura  = df.idDatosFactura AND PM4.conteo  = 4
+    LEFT JOIN  PM_RANKED  PM5  ON PM5.DatosFactura  = df.idDatosFactura AND PM5.conteo  = 5
+    LEFT JOIN  PM_RANKED  PM6  ON PM6.DatosFactura  = df.idDatosFactura AND PM6.conteo  = 6
+    LEFT JOIN  PM_RANKED  PM7  ON PM7.DatosFactura  = df.idDatosFactura AND PM7.conteo  = 7
+    LEFT JOIN  PM_RANKED  PM8  ON PM8.DatosFactura  = df.idDatosFactura AND PM8.conteo  = 8
+    LEFT JOIN  PM_RANKED  PM9  ON PM9.DatosFactura  = df.idDatosFactura AND PM9.conteo  = 9
+    LEFT JOIN  PM_RANKED  PM10 ON PM10.DatosFactura = df.idDatosFactura AND PM10.conteo = 10
+
+    WHERE TO_CHAR(dre.fechaenvio, 'YYYYMM') =
+            TO_CHAR(
+                CASE WHEN TRUNC(SYSDATE) = (SELECT PrimerDiaMes FROM CALC_PRIMER_DIA_MES)
+                     THEN ADD_MONTHS((SELECT PrimerDiaMes FROM CALC_PRIMER_DIA_MES), -1)
+                END,
+            'YYYYMM')
+      AND TO_CHAR(SYSDATE, 'D', 'NLS_TERRITORY=AMERICA') NOT IN ('1','7')
+      AND dre.IdDesembolsodetalle IN (1, 2, 6, 7)
+)
+
+-- -------------------------------------------------------
+-- SELECT FINAL
+-- WHERE CORTE DISPERSION = PrimerDiaHabilMes + '.0900'
+-- ORDER BY columna 10 (CANAL GIRO en posición original)
+-- -------------------------------------------------------
+SELECT *
+FROM GIRO
+WHERE "CORTE DISPERSION" =
+    (SELECT TO_CHAR(PrimerDiaHabilMes, 'YYMMDD') || '.0900'
+     FROM CALC_PRIMER_DIA_HABIL)
+ORDER BY 10 ASC;
