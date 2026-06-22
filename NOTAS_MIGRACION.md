@@ -126,7 +126,7 @@ referencian directamente.
   ajustar la plantilla de salida de GoAnywhere (esto no se puede resolver
   solo con sintaxis SQL).
 
-## 9. Archivos entregados
+## 9. Archivos entregados — versión 1_v2
 
 - `FECHA_INICIO_MES_ORACLE.sql`
 - `FECHA_FIN_MES_ORACLE.sql`
@@ -136,3 +136,42 @@ referencian directamente.
 - `TOTAL_DETALLE_GIRO_ORACLE.sql`
 - `HELPER_FUNCTIONS_ORACLE.sql` (ejecutar primero)
 - `NOTAS_MIGRACION.md` (este archivo)
+
+## 10. Archivos entregados — versión 2_v2
+
+Misma lógica de negocio que 1_v2, con las diferencias puntuales descritas en
+la sección 2 de este documento (y detalladas también en el encabezado de cada
+archivo `_2V2`):
+
+- `FECHA_INICIO_MES_ORACLE_2V2.sql` — idéntico a la versión 1_v2.
+- `FECHA_FIN_MES_ORACLE_2V2.sql` — idéntico a la versión 1_v2.
+- `DETALLE_DESEMBOLSO_ORACLE_2V2.sql` — cambia `=` por `>` en el filtro de
+  CORTE DISPERSION y el `ORDER BY` de 29 a 32 (ahora sí apunta a la columna
+  real CORTE DISPERSION, la última del SELECT).
+- `DETALLE_GIRO_ORACLE_2V2.sql` — las tablas derivadas PM1..PM10
+  (InformacionPM) ahora leen desde `originacionprod.tabla@dbl_originacionprod`
+  (servidor productivo .71, NO snapshot) en vez del DB LINK de snapshot usado
+  en 1_v2; el resto de joins de este query siguen sobre
+  `OriginacionPROD_SNAPSHOT`. También cambia el filtro
+  `IdDesembolsodetalle IN (1,2,6,7)` → `IN (1,6,7)`, se agrega una rama nueva
+  en CANAL GIRO (`bMantenimientoPrepagado=1 AND IdDesembolsoDetalle=6` →
+  `'GIRO ACH'`), y cambia `=` por `>` en el filtro final de CORTE DISPERSION.
+  **Pendiente:** confirmar con el DBA el nombre real del DB LINK
+  `dbl_originacionprod` (servidor productivo, distinto del de snapshot).
+- `TOTAL_DETALLE_DESEMBOLSO_ORACLE_2V2.sql` — el join hacia Seguros pasa de
+  LEFT JOIN a INNER JOIN, el filtro de fecha ya no resta 17 días
+  (`getdate()` en vez de `getdate()-17`), y cambia `=` por `>` en el filtro
+  final.
+- `TOTAL_DETALLE_GIRO_ORACLE_2V2.sql` — único cambio: `=` por `>` en el
+  filtro final de CORTE DISPERSION.
+
+Los comentarios inertes presentes en el SQL Server original de 2_v2
+(`--and a.OP <> 1219460`, `--and a.Solicitud <> 1219460`,
+`--and dre.Solicitud <> 1219460`, rama comentada de `bBlindaje`) se
+preservaron como comentarios en Oracle; no son filtros activos y no afectan
+el resultado.
+
+`HELPER_FUNCTIONS_ORACLE.sql` (sección 6) es compartido por ambas versiones
+(1_v2 y 2_v2): solo es necesario ejecutarlo una vez en el esquema
+`bdpremierprueba`.
+
