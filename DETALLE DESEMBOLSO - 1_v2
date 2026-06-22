@@ -1,0 +1,268 @@
+-- ============================================================
+-- DETALLE DESEMBOLSO - 1_v2
+-- Conversión SQL Server → Oracle (compatible GoAnywhere MFT)
+-- ============================================================
+WITH 
+-- -------------------------------------------------------
+-- BLOQUE 1: Cálculo de DiaIniMes
+-- Primer día del mes anterior al actual
+-- SQL Server: DATEADD(day,1, EOMONTH(GETDATE(),-2))
+-- -------------------------------------------------------
+CALC_DIA_INI AS (
+    SELECT 
+        LAST_DAY(ADD_MONTHS(SYSDATE, -2)) + 1 AS DiaIniMes
+    FROM DUAL
+),
+
+-- -------------------------------------------------------
+-- BLOQUE 2: Cálculo de PrimerDiaHabilMes (mes anterior)
+-- Primer día hábil del mes anterior, saltando fines de 
+-- semana y festivos de DIASFESTIVOS
+-- -------------------------------------------------------
+CALC_PRIMER_DIA_HABIL AS (
+    SELECT
+        CASE
+            -- Sábado (7) y el lunes siguiente NO es festivo → lunes
+            WHEN TO_CHAR(c.DiaIniMes, 'D', 'NLS_TERRITORY=AMERICA') = '7'
+                 AND (c.DiaIniMes + 2) <> NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS 
+                         WHERE Fecha = c.DiaIniMes + 2),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN c.DiaIniMes + 2
+
+            -- Domingo (1) y el lunes siguiente NO es festivo → lunes
+            WHEN TO_CHAR(c.DiaIniMes, 'D', 'NLS_TERRITORY=AMERICA') = '1'
+                 AND (c.DiaIniMes + 1) <> NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS 
+                         WHERE Fecha = c.DiaIniMes + 1),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN c.DiaIniMes + 1
+
+            -- Sábado (7) y el lunes SÍ es festivo → martes
+            WHEN TO_CHAR(c.DiaIniMes, 'D', 'NLS_TERRITORY=AMERICA') = '7'
+                 AND (c.DiaIniMes + 2) = NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS 
+                         WHERE Fecha = c.DiaIniMes + 2),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN c.DiaIniMes + 3
+
+            -- Domingo (1) y el lunes SÍ es festivo → martes
+            WHEN TO_CHAR(c.DiaIniMes, 'D', 'NLS_TERRITORY=AMERICA') = '1'
+                 AND (c.DiaIniMes + 1) = NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS 
+                         WHERE Fecha = c.DiaIniMes + 1),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN c.DiaIniMes + 2
+
+            -- Lunes a jueves (2,3,4,5) y ese día ES festivo → día siguiente
+            WHEN TO_CHAR(c.DiaIniMes, 'D', 'NLS_TERRITORY=AMERICA') IN ('2','3','4','5')
+                 AND c.DiaIniMes = NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS 
+                         WHERE Fecha = c.DiaIniMes),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN c.DiaIniMes + 1
+
+            -- Viernes (6) y ese día ES festivo → lunes
+            WHEN TO_CHAR(c.DiaIniMes, 'D', 'NLS_TERRITORY=AMERICA') = '6'
+                 AND c.DiaIniMes = NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS 
+                         WHERE Fecha = c.DiaIniMes),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN c.DiaIniMes + 3
+
+            -- Día hábil normal → mismo día
+            ELSE c.DiaIniMes
+        END AS PrimerDiaHabilMes
+    FROM CALC_DIA_INI c
+),
+
+-- -------------------------------------------------------
+-- BLOQUE 3: Cálculo de DiaFinMes
+-- Primer día del mes actual
+-- SQL Server: DATEADD(day,1, EOMONTH(GETDATE(),-1))
+-- -------------------------------------------------------
+CALC_DIA_FIN AS (
+    SELECT 
+        LAST_DAY(ADD_MONTHS(SYSDATE, -1)) + 1 AS DiaFinMes
+    FROM DUAL
+),
+
+-- -------------------------------------------------------
+-- BLOQUE 4: Cálculo de PrimerDiaMes (mes actual)
+-- Primer día hábil del mes actual, saltando fines de 
+-- semana y festivos
+-- -------------------------------------------------------
+CALC_PRIMER_DIA_MES AS (
+    SELECT
+        CASE
+            -- Sábado y lunes siguiente NO es festivo → lunes
+            WHEN TO_CHAR(f.DiaFinMes, 'D', 'NLS_TERRITORY=AMERICA') = '7'
+                 AND (f.DiaFinMes + 2) <> NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS 
+                         WHERE Fecha = f.DiaFinMes + 2),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN f.DiaFinMes + 2
+
+            -- Domingo y lunes siguiente NO es festivo → lunes
+            WHEN TO_CHAR(f.DiaFinMes, 'D', 'NLS_TERRITORY=AMERICA') = '1'
+                 AND (f.DiaFinMes + 1) <> NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS 
+                         WHERE Fecha = f.DiaFinMes + 1),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN f.DiaFinMes + 1
+
+            -- Sábado y lunes SÍ es festivo → martes
+            WHEN TO_CHAR(f.DiaFinMes, 'D', 'NLS_TERRITORY=AMERICA') = '7'
+                 AND (f.DiaFinMes + 2) = NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS 
+                         WHERE Fecha = f.DiaFinMes + 2),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN f.DiaFinMes + 3
+
+            -- Domingo y lunes SÍ es festivo → martes
+            WHEN TO_CHAR(f.DiaFinMes, 'D', 'NLS_TERRITORY=AMERICA') = '1'
+                 AND (f.DiaFinMes + 1) = NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS 
+                         WHERE Fecha = f.DiaFinMes + 1),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN f.DiaFinMes + 2
+
+            -- Lunes a jueves y ese día ES festivo → día siguiente
+            WHEN TO_CHAR(f.DiaFinMes, 'D', 'NLS_TERRITORY=AMERICA') IN ('2','3','4','5')
+                 AND f.DiaFinMes = NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS 
+                         WHERE Fecha = f.DiaFinMes),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN f.DiaFinMes + 1
+
+            -- Viernes y ese día ES festivo → lunes
+            WHEN TO_CHAR(f.DiaFinMes, 'D', 'NLS_TERRITORY=AMERICA') = '6'
+                 AND f.DiaFinMes = NVL(
+                        (SELECT Fecha FROM BANCA.DIASFESTIVOS 
+                         WHERE Fecha = f.DiaFinMes),
+                        TO_DATE('01/01/1900','DD/MM/YYYY'))
+                 THEN f.DiaFinMes + 3
+
+            ELSE f.DiaFinMes
+        END AS PrimerDiaMes
+    FROM CALC_DIA_FIN f
+),
+
+-- -------------------------------------------------------
+-- BLOQUE 5: Query principal de DETALLE DESEMBOLSO
+-- -------------------------------------------------------
+DETALLE AS (
+    SELECT DISTINCT
+         dsm.Solicitud                                      AS OP
+        ,TO_CHAR(CAST(dre.FechaEnvio AS DATE), 'DD/MM/YYYY') AS FECHA
+        ,dsm.numeroCredito                                  AS NUMEROCREDITO
+        ,CASE 
+            WHEN sor.Nombres IS NULL THEN 
+                CASE 
+                    WHEN cli.NombreConcatenado IS NOT NULL 
+                        THEN REPLACE(CAST(cli.NombreConcatenado AS VARCHAR2(100)), 'Cliente : ', '')
+                    ELSE UPPER(
+                            cli.Apellido1 || ' ' || NVL(cli.Apellido2,'') 
+                            || ', ' || cli.Nombre1 || ' ' || NVL(cli.Nombre2,'')
+                         )
+                END
+            ELSE sor.Nombres 
+         END                                                AS NOMBRE
+        ,dsm.tipoIdentificacion                             AS "TIPO CC/CE"
+        ,dsm.numeroIdentificacion                           AS "CC/CE"
+        -- PLAZOMESES: reemplaza Format_Number con LPAD nativo Oracle
+        ,CASE pla.unidadTiempo 
+            WHEN 'M' THEN '2' 
+            WHEN 'A' THEN '3' 
+            ELSE '0' 
+         END 
+         || LPAD(TRIM(TO_CHAR(pla.Cuotas,'999')), 3, '0')  AS PLAZOMESES
+        ,tas.Efectiva                                       AS INTERES
+        ,'$' || TRIM(TO_CHAR(CAST(fac.ValorVehiculoFactura AS NUMBER)))   AS VLRVEHICULOFACTURA
+        ,'$' || TRIM(TO_CHAR(CAST(ope.MontoaFinanciarSinSeguros AS NUMBER))) AS VLRFINANCIARVEHICULO
+        ,'$' || TRIM(TO_CHAR(CAST(NVL(est.ValorSubvecionado,0) AS NUMBER)))  AS VLRSUBVENCION
+        -- MANTENIMIENTO_PREPAGADO: reemplaza FormatMoney con TO_CHAR
+        ,'$' || TRIM(TO_CHAR(NVL(seg.iValorMantenimiento,0), 'FM999,999,999,999')) AS MANTENIMIENTO_PREPAGADO
+        ,'$' || TRIM(TO_CHAR(CAST(NVL(fac.ValorAccesoriosFactura,0) AS NUMBER))) AS VLRACCESORIOS
+        ,'$' || TRIM(TO_CHAR(CAST(NVL(seg.PrimaSegurodeVida,0) AS NUMBER)))  AS VLRVIDA
+        ,'$' || TRIM(TO_CHAR(CAST(
+                NVL(seg.PrimaSegurodeDesempleo, NVL(seg.ValorProteccionFinancieraM,0)) 
+                AS NUMBER)))                                AS VLRPROTECCIONFINANCIERA
+        ,'$' || TRIM(TO_CHAR(CAST(NVL(seg.PrimaSegurodeAutomovil,0) AS NUMBER))) AS VLRSEGUROVEHICULO
+        ,NVL(seg.BonoAstara,0)                              AS "BONO POLIZA"
+        ,NVL(seg.valorPolizaTR,0)                           AS "VLR TR A FINANCIAR"
+        ,'$' || TRIM(TO_CHAR(CAST(NVL(ope.GMF,0) AS NUMBER)))    AS GMF
+        ,'$' || TRIM(TO_CHAR(CAST(
+                CASE WHEN est.tipodeGarantia = 2 THEN 0 
+                     ELSE NVL(rgm.RGM,0) 
+                END AS NUMBER)))                            AS RGM
+        ,'$' || TRIM(TO_CHAR(CAST(dsm.montoDesembolsar AS NUMBER))) AS TOTALDESEMBOLSO
+        ,dpa.DiadePagoCuota                                 AS FECHAPAGO
+        ,NVL(fac.MarcaFactura, sor.Marca)                   AS MARCA
+        ,NVL(fac.LineaFactura, sor.LineaVeh)                AS LINEA
+        ,NVL(fac.ModeloFactura, sor.Modelo)                 AS MODELO
+        ,CASE WHEN sor.fasecolda IS NULL THEN fas.fasecolda 
+              ELSE sor.fasecolda 
+         END                                                AS FASECOLDA
+        ,fac.Placa                                          AS PLACA
+        ,fac.ChasisFactura                                  AS CHASIS
+        ,fac.MotorFactura                                   AS MOTOR
+        ,mds.Valor                                          AS MODALIDADPAGOSEGUROVIDA
+        ,CASE 
+            WHEN seg.PrimaSegurodeDesempleo > 0 THEN 'Anual'
+            WHEN seg.ValorProteccionFinancieraM > 0 THEN 'Mensual'
+            ELSE '' 
+         END                                                AS MODALIDADPROTECCIONFINANCIERA
+        -- CORTE DISPERSION: reemplaza Format_DateToString + FORMAT con TO_CHAR Oracle
+        ,CASE 
+            WHEN TO_CHAR(dre.fechaenvio, 'HH24') BETWEEN '07' AND '09' 
+                THEN TO_CHAR(dre.fechaenvio, 'YYMMDD') || '.0900'
+            WHEN TO_CHAR(dre.fechaenvio, 'HH24') BETWEEN '11' AND '13' 
+                THEN TO_CHAR(dre.fechaenvio, 'YYMMDD') || '.1300'
+            WHEN TO_CHAR(dre.fechaenvio, 'HH24') IN ('14','15') 
+                THEN TO_CHAR(dre.fechaenvio, 'YYMMDD') || '.1500'
+         END                                                AS "CORTE DISPERSION"
+
+    FROM ORIGINACION.DESEMBOLSO dsm
+    LEFT JOIN  ORIGINACION.DESEMBOLSORELACION             dre ON dre.solicitud    = dsm.Solicitud
+    LEFT JOIN  REPORTES.ORIGINACION_SOLICITUDES           sor ON dsm.Solicitud    = sor.solicitud
+    INNER JOIN ORIGINACIONPROD.ORIGINACION                ori ON ori.caso         = dsm.Solicitud
+    INNER JOIN ORIGINACIONPROD.DATOSFACTURA               fac ON ori.DatosFactura = fac.idDatosFactura
+    INNER JOIN ORIGINACIONPROD.SEGUROS                    seg ON ori.Seguros      = seg.idSeguros
+    INNER JOIN ORIGINACIONPROD.INFORMACIONESTUDIO         est ON ori.InformaciondeEstudio = est.idInformacionestudio
+    INNER JOIN ORIGINACIONPROD.OPERACIONES                ope ON ori.Operaciones  = ope.idOPeraciones
+    INNER JOIN ORIGINACIONPROD.PLANFINANCIACION           pla ON ori.PlanFinanciacion = pla.idPlanFinanciacion
+    INNER JOIN ORIGINACIONPROD.TASAS_EK                   tas1 ON est.Tasa        = tas1.idTasas
+    INNER JOIN ORIGINACIONPROD.TASAS                      tas  ON tas1.id1        = tas.id1
+    LEFT JOIN  ORIGINACIONPROD.DIADEPAGO                  dpa  ON ope.DiadePago   = dpa.idDiadePago
+    LEFT JOIN  ORIGINACIONPROD.MODALIDADPAGOSEGUROVIDA    mds  ON mds.idModalidadPagoSegurovida = seg.ModalidadPagoseguroVida
+    LEFT JOIN  ORIGINACIONPROD.CLIENTE                    cli  ON ori.Cliente     = cli.idCliente
+    LEFT JOIN  ORIGINACIONPROD.VEHICULO                   veh  ON ori.Vehiculo    = veh.idVehiculo
+    LEFT JOIN  ORIGINACIONPROD.FASECOLDA_REF3_EK          re3  ON veh.FASECOLDA   = re3.idFASECOLDA_REF3
+    LEFT JOIN  ORIGINACIONPROD.FASECOLDA_REF3             fas  ON re3.id1         = fas.id1
+    LEFT JOIN  ORIGINACIONPROD.REGISTROGARANTIAMOBILIAR   rgm  ON rgm.idRegistroGarantiaMobiliar = ope.rgm
+
+    -- -------------------------------------------------------
+    -- WHERE: filtro de mes + día hábil de ejecución
+    -- Equivale al bloque where del script original 1_v2
+    -- -------------------------------------------------------
+    WHERE TO_CHAR(dre.fechaenvio, 'YYYYMM') = 
+            TO_CHAR(
+                CASE WHEN TRUNC(SYSDATE) = (SELECT PrimerDiaMes FROM CALC_PRIMER_DIA_MES)
+                     THEN ADD_MONTHS((SELECT PrimerDiaMes FROM CALC_PRIMER_DIA_MES), -1)
+                END,
+            'YYYYMM')
+      AND TO_CHAR(SYSDATE, 'D', 'NLS_TERRITORY=AMERICA') NOT IN ('1','7')
+      AND IdDesembolsodetalle = 1
+)
+
+-- -------------------------------------------------------
+-- SELECT FINAL con filtro de corte de dispersión
+-- Equivale al: where a.[CORTE DISPERSION] = format(@PrimerDiaHabilMes,'yyMMdd') + '.0900'
+-- -------------------------------------------------------
+SELECT *
+FROM DETALLE
+WHERE "CORTE DISPERSION" = 
+    (SELECT TO_CHAR(PrimerDiaHabilMes, 'YYMMDD') || '.0900' 
+     FROM CALC_PRIMER_DIA_HABIL)
+ORDER BY 29 ASC;
