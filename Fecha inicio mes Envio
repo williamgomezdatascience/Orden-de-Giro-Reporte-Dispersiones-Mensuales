@@ -1,0 +1,98 @@
+-- ============================================================
+-- FECHA_INICIO_MES - Envío
+-- Conversión SQL Server → Oracle (compatible GoAnywhere MFT)
+-- Devuelve: fecha en formato 'YYMMDD' del primer día hábil
+-- del mes anterior, ajustada si ese día es festivo.
+--
+-- Lógica:
+--  1. DiaIniMes   = último día de hace 2 meses
+--                   (SQL Server: EOMONTH(GETDATE(),-2)
+--                    Oracle:     LAST_DAY(ADD_MONTHS(SYSDATE,-2)) )
+--  2. PrimerDiaHabilMes = DiaIniMes ajustado por fin de semana
+--  3. FestivoIni  = consulta si PrimerDiaHabilMes es festivo
+--  4. FechaIni    = PrimerDiaHabilMes si no es festivo,
+--                   PrimerDiaHabilMes + 1 si sí lo es
+--  5. SELECT devuelve TO_CHAR(FechaIni,'YYMMDD')
+-- ============================================================
+WITH
+-- -------------------------------------------------------
+-- PASO 1: DiaIniMes = último día del mes de hace 2 meses
+-- SQL Server: DATEADD(month,-2, EOMONTH(GETDATE()))
+-- Nota: a diferencia del 1_v2 NO suma +1 día;
+-- aquí se queda en el último día del mes anterior al anterior
+-- -------------------------------------------------------
+CALC_DIA_INI AS (
+    SELECT
+        LAST_DAY(ADD_MONTHS(SYSDATE, -2)) AS DiaIniMes
+    FROM DUAL
+),
+
+-- -------------------------------------------------------
+-- PASO 2: PrimerDiaHabilMes
+-- Ajusta DiaIniMes saltando sábado (7), domingo (1),
+-- lunes-jueves (2-5) y viernes (6).
+-- En este script NO se consulta festivos aquí todavía;
+-- eso ocurre en el paso siguiente (FestivoIni).
+-- -------------------------------------------------------
+CALC_PRIMER_DIA_HABIL AS (
+    SELECT
+        CASE
+            -- Sábado → lunes (+2)
+            WHEN TO_CHAR(c.DiaIniMes, 'D', 'NLS_TERRITORY=AMERICA') = '7'
+                THEN c.DiaIniMes + 2
+            -- Domingo → lunes (+1)
+            WHEN TO_CHAR(c.DiaIniMes, 'D', 'NLS_TERRITORY=AMERICA') = '1'
+                THEN c.DiaIniMes + 1
+            -- Lunes a jueves → día siguiente (+1)
+            WHEN TO_CHAR(c.DiaIniMes, 'D', 'NLS_TERRITORY=AMERICA') IN ('2','3','4','5')
+                THEN c.DiaIniMes + 1
+            -- Viernes → lunes (+3)
+            WHEN TO_CHAR(c.DiaIniMes, 'D', 'NLS_TERRITORY=AMERICA') = '6'
+                THEN c.DiaIniMes + 3
+        END AS PrimerDiaHabilMes
+    FROM CALC_DIA_INI c
+),
+
+-- -------------------------------------------------------
+-- PASO 3: FestivoIni
+-- Consulta si PrimerDiaHabilMes está registrado como festivo
+-- SQL Server: SELECT Fecha FROM BDFinanciera.dbo.DiasFestivos
+--             WHERE Fecha = @PrimerDiaHabilMes
+-- Oracle: subconsulta escalar; NULL si no es festivo
+-- -------------------------------------------------------
+CALC_FESTIVO_INI AS (
+    SELECT
+        h.PrimerDiaHabilMes,
+        (SELECT Fecha
+         FROM BANCA.DIASFESTIVOS
+         WHERE Fecha = h.PrimerDiaHabilMes) AS FestivoIni
+    FROM CALC_PRIMER_DIA_HABIL h
+),
+
+-- -------------------------------------------------------
+-- PASO 4: FechaIni
+-- Si PrimerDiaHabilMes <> festivo (o no hay festivo) → usarlo
+-- Si PrimerDiaHabilMes = festivo → sumar 1 día
+-- La condición DATEPART(dw,...) IN (2,3,4,5,6,7,1) del
+-- original es siempre TRUE (cubre todos los días),
+-- se simplifica al CASE directo.
+-- -------------------------------------------------------
+CALC_FECHA_INI AS (
+    SELECT
+        CASE
+            WHEN f.PrimerDiaHabilMes <> NVL(f.FestivoIni, TO_DATE('01/01/1900','DD/MM/YYYY'))
+                THEN f.PrimerDiaHabilMes
+            WHEN f.PrimerDiaHabilMes = NVL(f.FestivoIni, TO_DATE('01/01/1900','DD/MM/YYYY'))
+                THEN f.PrimerDiaHabilMes + 1
+        END AS FechaIni
+    FROM CALC_FESTIVO_INI f
+)
+
+-- -------------------------------------------------------
+-- RESULTADO FINAL
+-- SQL Server: SELECT FORMAT(@FechaIni,'yyMMdd')
+-- Oracle:     TO_CHAR(FechaIni,'YYMMDD')
+-- -------------------------------------------------------
+SELECT
+    TO_CHAR(FechaIni, 'YYMMDD') AS FECHA_INICIO
+FROM CALC_FECHA_INI;
