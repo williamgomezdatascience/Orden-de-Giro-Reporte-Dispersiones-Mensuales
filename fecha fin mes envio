@@ -1,0 +1,117 @@
+-- ============================================================
+-- FECHA_FIN_MES - Envío
+-- Conversión SQL Server → Oracle (compatible GoAnywhere MFT)
+-- Devuelve: fecha en formato 'YYMMDD' + nombre del mes
+-- del último día hábil del mes anterior.
+--
+-- Lógica:
+--  1. DiaFinMes    = último día del mes anterior
+--                    (SQL Server: EOMONTH(GETDATE(),-1)
+--                     Oracle:     LAST_DAY(ADD_MONTHS(SYSDATE,-1)) )
+--  2. UltimoDiaMes = DiaFinMes retrocedido para evitar
+--                    lunes (2→ -3), domingo (1→ -2),
+--                    sábado (7→ -1), mar-vie (3-6→ -1)
+--  3. FestivoFinMes = consulta si UltimoDiaMes es festivo
+--  4. FechaFin     = UltimoDiaMes si no es festivo,
+--                    UltimoDiaMes - 1 si sí lo es
+--  5. SELECT devuelve TO_CHAR(FechaFin,'YYMMDD')
+--             y nombre del mes en español
+--
+-- Nota sobre SET LANGUAGE Spanish:
+--   SQL Server lo usa para que DATENAME devuelva el mes en
+--   español. En Oracle se logra con NLS_DATE_LANGUAGE='SPANISH'
+--   dentro del TO_CHAR.
+-- ============================================================
+WITH
+-- -------------------------------------------------------
+-- PASO 1: DiaFinMes = último día del mes anterior
+-- SQL Server: DATEADD(month,-1, EOMONTH(GETDATE()))
+--             que equivale al propio EOMONTH(GETDATE(),-1)
+-- -------------------------------------------------------
+CALC_DIA_FIN AS (
+    SELECT
+        LAST_DAY(ADD_MONTHS(SYSDATE, -1)) AS DiaFinMes
+    FROM DUAL
+),
+
+-- -------------------------------------------------------
+-- PASO 2: UltimoDiaMes
+-- Retrocede desde DiaFinMes para llegar al viernes
+-- (o jueves/miércoles/martes si el viernes es festivo,
+-- eso se resuelve en el paso siguiente).
+--
+-- Mapeo DATEPART(dw) SQL Server → TO_CHAR 'D' NLS_AMERICA:
+--   Domingo = 1, Lunes = 2, Martes = 3, Miércoles = 4,
+--   Jueves  = 5, Viernes = 6, Sábado = 7
+--
+-- Reglas originales:
+--   Sábado  (7) → -1 día  (viernes)
+--   Domingo (1) → -2 días (viernes)
+--   Lunes   (2) → -3 días (viernes)
+--   Mar-Vie (3,4,5,6) → -1 día
+-- -------------------------------------------------------
+CALC_ULTIMO_DIA AS (
+    SELECT
+        CASE
+            -- Sábado → viernes anterior
+            WHEN TO_CHAR(f.DiaFinMes, 'D', 'NLS_TERRITORY=AMERICA') = '7'
+                THEN f.DiaFinMes - 1
+            -- Domingo → viernes anterior
+            WHEN TO_CHAR(f.DiaFinMes, 'D', 'NLS_TERRITORY=AMERICA') = '1'
+                THEN f.DiaFinMes - 2
+            -- Lunes → viernes anterior
+            WHEN TO_CHAR(f.DiaFinMes, 'D', 'NLS_TERRITORY=AMERICA') = '2'
+                THEN f.DiaFinMes - 3
+            -- Martes, miércoles, jueves, viernes → día anterior
+            WHEN TO_CHAR(f.DiaFinMes, 'D', 'NLS_TERRITORY=AMERICA') IN ('3','4','5','6')
+                THEN f.DiaFinMes - 1
+        END AS UltimoDiaMes,
+        f.DiaFinMes
+    FROM CALC_DIA_FIN f
+),
+
+-- -------------------------------------------------------
+-- PASO 3: FestivoFinMes
+-- Consulta si UltimoDiaMes está en la tabla de festivos
+-- NULL si no lo es
+-- -------------------------------------------------------
+CALC_FESTIVO_FIN AS (
+    SELECT
+        u.DiaFinMes,
+        u.UltimoDiaMes,
+        (SELECT Fecha
+         FROM BANCA.DIASFESTIVOS
+         WHERE Fecha = u.UltimoDiaMes) AS FestivoFinMes
+    FROM CALC_ULTIMO_DIA u
+),
+
+-- -------------------------------------------------------
+-- PASO 4: FechaFin
+-- Si UltimoDiaMes <> festivo → usarlo
+-- Si UltimoDiaMes = festivo  → retroceder 1 día más
+-- La condición DATEPART(dw,...) IN (1..7) es siempre TRUE;
+-- se simplifica igual que en FECHA_INICIO_MES.
+-- -------------------------------------------------------
+CALC_FECHA_FIN AS (
+    SELECT
+        CASE
+            WHEN f.UltimoDiaMes <> NVL(f.FestivoFinMes, TO_DATE('01/01/1900','DD/MM/YYYY'))
+                THEN f.UltimoDiaMes
+            WHEN f.UltimoDiaMes = NVL(f.FestivoFinMes, TO_DATE('01/01/1900','DD/MM/YYYY'))
+                THEN f.UltimoDiaMes - 1
+        END AS FechaFin
+    FROM CALC_FESTIVO_FIN f
+)
+
+-- -------------------------------------------------------
+-- RESULTADO FINAL
+-- SQL Server: SELECT FORMAT(@FechaFin,'yyMMdd')
+--                   ,DATENAME(month,@FechaFin)  ← con SET LANGUAGE Spanish
+-- Oracle:     TO_CHAR(FechaFin,'YYMMDD')
+--             TO_CHAR(FechaFin,'Month','NLS_DATE_LANGUAGE=SPANISH')
+--             INITCAP para capitalizar igual que DATENAME
+-- -------------------------------------------------------
+SELECT
+     TO_CHAR(FechaFin, 'YYMMDD')                                              AS FECHA_FIN
+    ,INITCAP(TO_CHAR(FechaFin, 'MONTH', 'NLS_DATE_LANGUAGE=SPANISH'))         AS NOMBRE_MES
+FROM CALC_FECHA_FIN;
